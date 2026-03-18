@@ -1,0 +1,270 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ─── Enums ────────────────────────────────────────────────
+
+enum AuditStatus {
+  QUEUED
+  CRAWLING
+  RUNNING
+  COMPLETED
+  FAILED
+}
+
+enum Severity {
+  CRITICAL
+  SERIOUS
+  MODERATE
+  MINOR
+}
+
+enum InpRating {
+  GOOD
+  NEEDS_IMPROVEMENT
+  POOR
+}
+
+enum DecayBucket {
+  HEALTHY
+  STAGNANT
+  DECLINING
+  DECAY_CANDIDATE
+}
+
+enum CitationPlatform {
+  GEMINI
+  PERPLEXITY
+  CHATGPT
+  CLAUDE
+}
+
+enum GapType {
+  CITATION_GAP
+  LOW_VISIBILITY
+  NOT_CITED
+}
+
+// ─── Models ───────────────────────────────────────────────
+
+model User {
+  id                   String   @id @default(cuid())
+  clerkId              String   @unique
+  email                String   @unique
+  name                 String?
+  plan                 String   @default("free")
+  auditLimit           Int      @default(5)
+  geminiApiKeyEncrypted String?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  auditRuns AuditRun[]
+
+  @@index([clerkId])
+}
+
+model AuditRun {
+  id                String      @id @default(cuid())
+  userId            String
+  targetDomain      String
+  status            AuditStatus @default(QUEUED)
+  selectedSteps     Int[]       @default([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18])
+  seedKeywords      String[]    @default([])
+  competitorDomains String[]    @default([])
+  maxPages          Int         @default(500)
+
+  // Progress
+  totalPages      Int     @default(0)
+  completedPages  Int     @default(0)
+  currentStep     Int?
+  currentStepName String?
+
+  // URA Scores
+  uraScoreU       Float?
+  uraScoreR       Float?
+  uraScoreA       Float?
+  uraScoreOverall Float?
+
+  startedAt   DateTime?
+  completedAt DateTime?
+  createdAt   DateTime  @default(now())
+
+  user            User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  pages           AuditPage[]
+  issues          AuditIssue[]
+  citationQueries CitationQuery[]
+
+  @@index([userId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model AuditPage {
+  id         String @id @default(cuid())
+  auditRunId String
+  url        String
+  httpStatus Int?
+
+  // Step 2: Crawl Depth
+  crawlDepth Int?
+
+  // Step 3: Page Speed
+  performanceScore Float?
+
+  // Step 4: INP
+  inpValue  Float?
+  inpRating InpRating?
+
+  // Step 5: Mobile
+  mobileFriendly Boolean?
+
+  // Step 7: Accessibility
+  accessibilityScore Float?
+
+  // Usability: DOM Size (2026)
+  domNodeCount Int?
+
+  // Step 8: Title & Meta
+  titleTag              String?
+  titleLength           Int?
+  metaDescription       String?
+  metaDescriptionLength Int?
+
+  // Step 9: Headings + Visual Prominence (2026)
+  h1Count            Int?
+  h1FontSizePx       Float?
+  h1IsLargestHeading Boolean?
+
+  // Step 10: NLP
+  wordCount Int?
+
+  // Step 11: Internal Links
+  internalLinksInbound  Int?
+  internalLinksOutbound Int?
+
+  // Step 12: Content Decay
+  contentAge  Int?
+  decayBucket DecayBucket?
+
+  // Step 13: Schema (2026)
+  hasSameAs  Boolean?
+  sameAsUrls Json?
+
+  // Step 17: E-E-A-T (2026)
+  eeatScore      Float?
+  hasAuthorByline Boolean?
+  hasAuthorPage   Boolean?
+
+  // Overflow: full step results
+  details Json?
+
+  createdAt DateTime @default(now())
+
+  auditRun AuditRun     @relation(fields: [auditRunId], references: [id], onDelete: Cascade)
+  issues   AuditIssue[]
+
+  @@index([auditRunId])
+  @@index([decayBucket])
+  @@index([performanceScore])
+  @@index([domNodeCount])
+}
+
+model AuditIssue {
+  id             String   @id @default(cuid())
+  auditRunId     String
+  auditPageId    String?
+  stepNumber     Int
+  severity       Severity
+  category       String
+  message        String
+  selector       String?
+  recommendation String?
+  createdAt      DateTime @default(now())
+
+  auditRun  AuditRun   @relation(fields: [auditRunId], references: [id], onDelete: Cascade)
+  auditPage AuditPage? @relation(fields: [auditPageId], references: [id], onDelete: Cascade)
+
+  @@index([auditRunId])
+  @@index([severity])
+  @@index([stepNumber])
+  @@index([auditRunId, severity])
+}
+
+model CitationQuery {
+  id          String   @id @default(cuid())
+  auditRunId  String
+  queryText   String
+  seedKeyword String
+  createdAt   DateTime @default(now())
+
+  auditRun AuditRun         @relation(fields: [auditRunId], references: [id], onDelete: Cascade)
+  results  CitationResult[]
+
+  @@index([auditRunId])
+}
+
+model CitationResult {
+  id               String           @id @default(cuid())
+  citationQueryId  String
+  platform         CitationPlatform
+  responseText     String
+  citedDomains     Json
+  clientCited      Boolean
+  competitorsCited Json
+  citationContext  String?
+  createdAt        DateTime         @default(now())
+
+  citationQuery CitationQuery @relation(fields: [citationQueryId], references: [id], onDelete: Cascade)
+  gaps          CitationGap[]
+
+  @@index([citationQueryId])
+  @@index([platform])
+}
+
+model CitationGap {
+  id                String   @id @default(cuid())
+  citationResultId  String
+  competitorDomain  String
+  gapType           GapType
+  priority          Int      @default(0)
+  recommendedAction String?
+
+  citationResult CitationResult @relation(fields: [citationResultId], references: [id], onDelete: Cascade)
+
+  @@index([citationResultId])
+  @@index([gapType])
+}
+
+model FeatureFlags {
+  id        String   @id @default("global")
+  flags     Json
+  updatedAt DateTime @updatedAt
+  updatedBy String
+}
+
+model AdminAuditLog {
+  id        String   @id @default(cuid())
+  adminId   String
+  action    String
+  targetId  String?
+  details   Json
+  ipAddress String?
+  createdAt DateTime @default(now())
+
+  @@index([adminId])
+  @@index([action])
+  @@index([createdAt])
+}
+
+model AdminSettings {
+  id                   String   @id @default("global")
+  geminiApiKeyEncrypted String?
+  geminiMaxQueriesPerAudit Int   @default(12)
+  updatedAt            DateTime @updatedAt
+  updatedBy            String
+}
