@@ -177,10 +177,11 @@ export async function GET(
       }
 
       const reportData = buildReportData(audit);
+      const aiEvidence = await fetchAICitationEvidence(id);
       const html = generatePdfHtml(reportData, {
         targetDomain: audit.targetDomain,
         completedAt: audit.completedAt?.toISOString() ?? null,
-      });
+      }, aiEvidence);
 
       const { chromium } = await import('playwright');
       const browser = await chromium.launch({

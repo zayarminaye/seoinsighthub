@@ -27,13 +27,51 @@ function escapeHtml(str: string): string {
     .replace(/"/g, '&quot;');
 }
 
+interface PdfAICitationRow {
+  queryText: string;
+  seedKeyword: string;
+  platform: string;
+  clientCited: boolean;
+  citedDomains: string[];
+  competitorsCited: string[];
+  citationContext: string | null;
+  gapCount: number;
+  topGapType: string | null;
+  topGapPriority: number | null;
+  topGapAction: string | null;
+}
+
+interface PdfAICitationEvidence {
+  rows: PdfAICitationRow[];
+  summary: {
+    attemptedQueries: number;
+    successfulQueries: number;
+    failedQueries: number;
+    confidenceScore: number | null;
+  };
+}
+
+function topCounts(values: string[], limit: number): Array<{ value: string; count: number }> {
+  const map = new Map<string, number>();
+  for (const value of values) {
+    const key = value.trim().toLowerCase();
+    if (!key) continue;
+    map.set(key, (map.get(key) ?? 0) + 1);
+  }
+  return [...map.entries()]
+    .map(([value, count]) => ({ value, count }))
+    .sort((a, b) => b.count - a.count)
+    .slice(0, limit);
+}
+
 /**
  * Generate a self-contained HTML document for PDF rendering.
  * Uses inline styles only — no external resources needed.
  */
 export function generatePdfHtml(
   report: ReportData,
-  audit: { targetDomain: string; completedAt: string | null }
+  audit: { targetDomain: string; completedAt: string | null },
+  aiCitationEvidence?: PdfAICitationEvidence
 ): string {
   const { executive, scoreBreakdown, priorityActions, stepInsights, worstPerformers } = report;
   const completedDate = audit.completedAt
@@ -43,6 +81,18 @@ export function generatePdfHtml(
         day: 'numeric',
       })
     : 'N/A';
+  const aiRows = aiCitationEvidence?.rows ?? [];
+  const aiSummary = aiCitationEvidence?.summary ?? {
+    attemptedQueries: 0,
+    successfulQueries: 0,
+    failedQueries: 0,
+    confidenceScore: null,
+  };
+  const clientCitedCount = aiRows.filter((r) => r.clientCited).length;
+  const clientCitationRate =
+    aiRows.length > 0 ? Math.round((clientCitedCount / aiRows.length) * 100) : 0;
+  const topCitedDomains = topCounts(aiRows.flatMap((r) => r.citedDomains), 6);
+  const topCompetitors = topCounts(aiRows.flatMap((r) => r.competitorsCited), 6);
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -195,6 +245,64 @@ export function generatePdfHtml(
   </div>
   `).join('')}
   ` : ''}
+
+  <!-- AI Citation Evidence -->
+  <div class="page-break"></div>
+  <h2>AI Citations Evidence</h2>
+  ${aiRows.length === 0 ? `
+    <p style="color:#6b7280;font-size:11px">No model-backed AI citation rows were available for this audit.</p>
+  ` : `
+    <div class="stats-row">
+      <div class="stat">
+        <div class="stat-value">${aiRows.length}</div>
+        <div class="stat-label">Analyzed Queries</div>
+      </div>
+      <div class="stat">
+        <div class="stat-value">${clientCitationRate}%</div>
+        <div class="stat-label">Client Citation Rate</div>
+      </div>
+      <div class="stat">
+        <div class="stat-value">${aiSummary.confidenceScore ?? 'N/A'}</div>
+        <div class="stat-label">Confidence</div>
+      </div>
+      <div class="stat">
+        <div class="stat-value">${aiSummary.successfulQueries}/${aiSummary.attemptedQueries}</div>
+        <div class="stat-label">Model Success</div>
+      </div>
+    </div>
+
+    <h3>Top Cited Domains</h3>
+    ${topCitedDomains.length === 0 ? '<p style="font-size:10px;color:#6b7280">No cited domains captured.</p>' : `
+      <p style="font-size:10px;color:#374151">${topCitedDomains.map((d) => `${escapeHtml(d.value)} (${d.count})`).join(' &middot; ')}</p>
+    `}
+
+    <h3 style="margin-top:12px">Top Competitor Citation Share</h3>
+    ${topCompetitors.length === 0 ? '<p style="font-size:10px;color:#6b7280">No competitor citation domains captured.</p>' : `
+      <p style="font-size:10px;color:#374151">${topCompetitors.map((d) => `${escapeHtml(d.value)} (${d.count})`).join(' &middot; ')}</p>
+    `}
+
+    <h3 style="margin-top:12px">Top Query Evidence</h3>
+    <table>
+      <thead>
+        <tr>
+          <th>Query</th>
+          <th style="width:90px">Client</th>
+          <th style="width:120px">Top Gap</th>
+          <th>Top Action</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${aiRows.slice(0, 12).map((row) => `
+        <tr>
+          <td>${escapeHtml(row.queryText)}</td>
+          <td>${row.clientCited ? 'Cited' : 'Not cited'}</td>
+          <td>${row.topGapType ? escapeHtml(`${row.topGapType} (P${row.topGapPriority ?? '-'})`) : '—'}</td>
+          <td>${row.topGapAction ? escapeHtml(row.topGapAction) : '—'}</td>
+        </tr>
+        `).join('')}
+      </tbody>
+    </table>
+  `}
 
   <!-- Issues Table -->
   <div class="page-break"></div>
