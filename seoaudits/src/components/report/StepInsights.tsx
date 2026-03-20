@@ -33,6 +33,13 @@ const STATUS_BADGE: Record<string, string> = {
 };
 
 const ISSUES_PER_PAGE = 10;
+const STEP16_OPERATIONAL_CATEGORIES = new Set([
+  'AI Analysis Disclaimer',
+  'AI Model Processing Notice',
+  'AI Model Quota Exceeded',
+  'AI Citation Data Notice',
+  'AI Query Budget Applied',
+]);
 
 interface Props {
   steps: StepInsight[];
@@ -97,6 +104,15 @@ function PassFailBadge({
 }
 
 function StepContent({ step }: { step: StepInsight }) {
+  const operationalNotices =
+    step.stepNumber === 16
+      ? step.issues.filter((issue) => STEP16_OPERATIONAL_CATEGORIES.has(issue.category))
+      : [];
+  const actionableIssues =
+    step.stepNumber === 16
+      ? step.issues.filter((issue) => !STEP16_OPERATIONAL_CATEGORIES.has(issue.category))
+      : step.issues;
+
   return (
     <div className="space-y-4 pt-2">
       {/* Key Metric */}
@@ -142,11 +158,29 @@ function StepContent({ step }: { step: StepInsight }) {
       )}
 
       {/* Issues Table */}
-      {step.issues.length > 0 && (
-        <StepIssuesTable issues={step.issues} />
+      {operationalNotices.length > 0 && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 p-3">
+          <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-amber-800">
+            AI Processing Notices
+          </h4>
+          <ul className="space-y-2">
+            {operationalNotices.map((notice) => (
+              <li key={notice.id} className="text-xs text-amber-900">
+                <div className="font-medium">{notice.message}</div>
+                {notice.recommendation && (
+                  <div className="mt-0.5 text-amber-800">{notice.recommendation}</div>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
       )}
 
-      {step.issues.length === 0 && step.totalRelevant > 0 && (
+      {actionableIssues.length > 0 && (
+        <StepIssuesTable issues={actionableIssues} />
+      )}
+
+      {actionableIssues.length === 0 && step.totalRelevant > 0 && (
         <p className="text-sm text-muted-foreground">No issues found in this step.</p>
       )}
     </div>
