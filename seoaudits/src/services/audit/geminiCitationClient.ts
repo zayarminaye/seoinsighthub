@@ -1,6 +1,11 @@
 import { z } from 'zod';
 
-const GEMINI_MODEL = 'gemini-2.0-flash';
+const GEMINI_MODELS = [
+  process.env.GEMINI_MODEL?.trim(),
+  'gemini-2.5-flash',
+  'gemini-flash-latest',
+  'gemini-2.5-flash-lite',
+].filter((m): m is string => Boolean(m));
 const GEMINI_TIMEOUT_MS = 20_000;
 const GEMINI_MAX_RETRIES = 2;
 
@@ -117,10 +122,9 @@ function buildPrompt(input: AnalyzeInput): string {
   ].join('\n');
 }
 
-async function callGeminiApi(apiKey: string, prompt: string): Promise<string> {
+async function callGeminiApiWithModel(apiKey: string, prompt: string, model: string): Promise<string> {
   const endpoint =
-    `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${encodeURIComponent(apiKey)}`;
-
+    `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`;
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), GEMINI_TIMEOUT_MS);
 
@@ -159,6 +163,28 @@ async function callGeminiApi(apiKey: string, prompt: string): Promise<string> {
   } finally {
     clearTimeout(timeout);
   }
+}
+
+async function callGeminiApi(apiKey: string, prompt: string): Promise<string> {
+  let lastError: Error | null = null;
+
+  for (const model of GEMINI_MODELS) {
+    try {
+      return await callGeminiApiWithModel(apiKey, prompt, model);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      const modelUnavailable =
+        message.includes('Gemini API error 404') &&
+        /no longer available|not found|NOT_FOUND/i.test(message);
+      lastError = err instanceof Error ? err : new Error(message);
+      if (modelUnavailable) {
+        continue;
+      }
+      throw lastError;
+    }
+  }
+
+  throw lastError ?? new Error('Gemini API call failed for all configured models.');
 }
 
 async function withRetry<T>(operation: () => Promise<T>, retries: number): Promise<T> {
