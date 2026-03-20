@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Card, CardContent } from '@/components/ui/card';
@@ -86,14 +86,14 @@ export default function AuditReportClient({
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold">{audit.targetDomain}</h1>
           <p className="text-sm text-muted-foreground">
             Completed {audit.completedAt ? formatDate(audit.completedAt) : 'N/A'}
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center justify-end gap-2">
           {canRunCitationAnalysis && <RerunAICitationsButton auditId={audit.id} />}
           <ExportButtons
             auditId={audit.id}
@@ -331,7 +331,7 @@ function ExportButtons({
   };
 
   return (
-    <div className="space-y-1">
+    <div className="relative">
       <div className="flex gap-1">
         {canExportPdf && (
           <Button
@@ -394,7 +394,11 @@ function ExportButtons({
           </Button>
         )}
       </div>
-      {error && <p className="text-xs text-destructive">{error}</p>}
+      {error && (
+        <p className="absolute right-0 top-full z-30 mt-2 w-72 rounded-md border border-destructive/30 bg-background p-2 text-xs text-destructive shadow-sm">
+          {error}
+        </p>
+      )}
     </div>
   );
 }
@@ -413,6 +417,19 @@ function RerunAICitationsButton({ auditId }: { auditId: string }) {
       .map((v) => v.trim())
       .filter(Boolean);
   }
+
+  useEffect(() => {
+    if (!showManualInputs) return;
+
+    function handleEscape(event: KeyboardEvent) {
+      if (event.key === 'Escape') {
+        setShowManualInputs(false);
+      }
+    }
+
+    window.addEventListener('keydown', handleEscape);
+    return () => window.removeEventListener('keydown', handleEscape);
+  }, [showManualInputs]);
 
   async function rerun() {
     setLoading(true);
@@ -495,44 +512,92 @@ function RerunAICitationsButton({ auditId }: { auditId: string }) {
   }
 
   return (
-    <div className="space-y-2">
-      <div className="flex flex-col items-start gap-2">
+    <div className="relative">
+      <div className="flex items-center gap-2">
         <Button variant="outline" size="sm" onClick={rerun} disabled={loading || manualLoading}>
           {loading ? 'Queueing...' : 'Re-run AI Citations'}
         </Button>
-        {showManualInputs && (
-          <div className="w-full max-w-md space-y-2 rounded-md border p-3">
-            <p className="text-xs text-muted-foreground">
-              This audit has no saved citation inputs. Add them below to run now.
-            </p>
-            <div className="space-y-1">
+      </div>
+      {status && (
+        <p
+          className={`absolute left-0 top-full z-30 mt-2 w-80 rounded-md border bg-background p-2 text-xs shadow-sm ${
+            status.type === 'success'
+              ? 'border-green-300/60 text-green-700'
+              : 'border-destructive/30 text-destructive'
+          }`}
+        >
+          {status.message}
+        </p>
+      )}
+      {showManualInputs && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+          onClick={(event) => {
+            if (event.target === event.currentTarget) {
+              setShowManualInputs(false);
+            }
+          }}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label="Citation analysis input form"
+            className="w-full max-w-xl space-y-4 rounded-xl border bg-background p-5 shadow-xl"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h3 className="text-base font-semibold">Run Citation Analysis</h3>
+                <p className="text-xs text-muted-foreground">
+                  This audit has no saved citation inputs. Add them below to run now.
+                </p>
+              </div>
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                onClick={() => setShowManualInputs(false)}
+                disabled={manualLoading}
+                className="h-8 px-2"
+              >
+                Close
+              </Button>
+            </div>
+
+            <div className="space-y-2">
               <label className="text-xs font-medium">Seed Keywords (comma-separated, min 5)</label>
               <textarea
-                className="min-h-16 w-full rounded-md border px-2 py-1 text-xs"
+                className="min-h-24 w-full rounded-md border px-3 py-2 text-sm"
                 value={seedKeywordsText}
                 onChange={(e) => setSeedKeywordsText(e.target.value)}
                 placeholder="ai job application tracker, linkedin job tracker extension, ..."
               />
             </div>
-            <div className="space-y-1">
+
+            <div className="space-y-2">
               <label className="text-xs font-medium">Competitor Domains (comma-separated)</label>
               <textarea
-                className="min-h-12 w-full rounded-md border px-2 py-1 text-xs"
+                className="min-h-20 w-full rounded-md border px-3 py-2 text-sm"
                 value={competitorDomainsText}
                 onChange={(e) => setCompetitorDomainsText(e.target.value)}
                 placeholder="workwise-ai.com, wizapply.app"
               />
             </div>
-            <Button size="sm" onClick={runWithManualInputs} disabled={manualLoading}>
-              {manualLoading ? 'Queueing...' : 'Run with these inputs'}
-            </Button>
+
+            <div className="flex flex-wrap justify-end gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setShowManualInputs(false)}
+                disabled={manualLoading}
+              >
+                Cancel
+              </Button>
+              <Button type="button" onClick={runWithManualInputs} disabled={manualLoading}>
+                {manualLoading ? 'Queueing...' : 'Run with these inputs'}
+              </Button>
+            </div>
           </div>
-        )}
-      </div>
-      {status && (
-        <p className={`text-xs ${status.type === 'success' ? 'text-green-700' : 'text-destructive'}`}>
-          {status.message}
-        </p>
+        </div>
       )}
     </div>
   );
